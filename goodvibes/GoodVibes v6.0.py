@@ -2,7 +2,7 @@
 #!/usr/bin/python
 from __future__ import print_function, absolute_import
 
-#######################################################################
+#gtbgtbhbh######################################################################
 #                              GoodVibes.py                           #
 #  Evaluation of quasi-harmonic thermochemistry from Gaussian.        #
 #  Partion functions are evaluated from vibrational frequencies       #
