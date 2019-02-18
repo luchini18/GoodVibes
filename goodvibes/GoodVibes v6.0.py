@@ -2,7 +2,7 @@
 #!/usr/bin/python
 from __future__ import print_function, absolute_import
 
-#gtbgtbhbh######################################################################
+#######################################################################
 #                              GoodVibes.py                           #
 #  Evaluation of quasi-harmonic thermochemistry from Gaussian.        #
 #  Partion functions are evaluated from vibrational frequencies       #
@@ -307,7 +307,7 @@ class getoutData:
 """from here"""
 # Read gaussian output for a single point energy
 def sp_energy(file):
-   spe, program, data, version_program, solvation_model, keyword_line, a = 'none', 'none', [], '', '', '', 0
+   spe, program, data, version_program, solvation_model, keyword_line, a, charge = 'none', 'none', [], '', '', '', 0, []
 
    if os.path.exists(os.path.splitext(file)[0]+'.log'):
        with open(os.path.splitext(file)[0]+'.log') as f: data = f.readlines()
@@ -335,10 +335,14 @@ def sp_energy(file):
                     line.strip(",").split(",")[i]
                     version_program += line.strip(",").split(",")[i]
                version_program = version_program[1:]
+           if line.strip().find("Charge") > -1 and line.strip().find("Multiplicity") > -1:
+              charge = line.strip("=").split()[2]
        if program == "Orca":
            if line.strip().startswith('FINAL SINGLE POINT ENERGY'): spe = float(line.strip().split()[4])
            if line.strip().find('Program Version') > -1:
               version_program = "ORCA version " + line.split()[2]
+           if line.strip().find("Total Charge") > -1 and line.strip().find("....") > -1:
+              charge = line.strip("=").split()[-1]
 
 # Solvation model detection
    if version_program.strip().find('Gaussian') > -1:
@@ -362,8 +366,12 @@ def sp_energy(file):
                end_scrf = keyword_line.find(")",start_scrf)
                solvation_model = "scrf=" + keyword_line[start_scrf:end_scrf] + ")"
             else:
+               start_scrf2 = keyword_line.strip().find('scrf') + 4
                end_scrf = keyword_line.find(" ",start_scrf)
-               solvation_model = "scrf=" + keyword_line[start_scrf:end_scrf]
+               if keyword_line[start_scrf2] == "(":
+                   solvation_model = "scrf=(" + keyword_line[start_scrf:end_scrf]
+               else:
+                   solvation_model = "scrf=" + keyword_line[start_scrf:end_scrf]
    if version_program.strip().find('ORCA') > -1:
         keyword_line_1 = "gas phase"
         for i, line in enumerate(data):
@@ -375,8 +383,7 @@ def sp_energy(file):
                keyword_line_3 = line.strip().split()[-1]
         solvation_model = keyword_line_1 + keyword_line_2 + keyword_line_3
 
-
-   return spe,program,version_program,solvation_model,file
+   return spe,program,version_program,solvation_model,file,charge
 
    """to here"""
 
@@ -653,8 +660,11 @@ class calc_bbe:
          if line.strip().startswith('Zero-point correction='): self.zero_point_corr = float(line.strip().split()[2])
          if line.strip().find('Multiplicity') > -1:
              """from here"""
-             try: mult = float(line.split('=')[-1].strip().split()[0])
-             except: mult = float(line.split()[-1])
+             try:
+                 mult = float(line.split('=')[-1].strip().split()[0])
+             except:
+                 mult = float(line.split()[-1])
+             self.mult = mult
              """to here"""
          if line.strip().startswith('Molecular mass:'): molecular_mass = float(line.strip().split()[2])
          if line.strip().startswith('Rotational symmetry number'): symmno = int((line.strip().split()[3]).split(".")[0])
@@ -668,7 +678,7 @@ class calc_bbe:
                  rotemp = None
                  """from here"""
                  if line.strip().find('********'):
-                     linear_warning = ["WARNING! Potential invalid calculation of linear molecule from Gaussian."]
+                     linear_warning = ["Warning! Potential invalid calculation of linear molecule from Gaussian."]
                      rotemp = [float(line.strip().split()[4]), float(line.strip().split()[5])]
 
                  """to here"""
@@ -949,9 +959,9 @@ def main():
          warning_linear = calc_bbe(file, options.QH, options.freq_cutoff, options.temperature, options.conc, options.freq_scale_factor, options.solv, options.spc)
          linear_warning = []
          linear_warning.append(warning_linear.linear_warning)
-         if linear_warning == [['WARNING! Potential invalid calculation of linear molecule from Gaussian.']]:
+         if linear_warning == [['Warning! Potential invalid calculation of linear molecule from Gaussian.']]:
              log.Write("\nx  "+'{:<39}'.format(os.path.splitext(os.path.basename(file))[0]))
-             log.Write('          ----   WARNING! Potential invalid calculation of linear molecule from Gaussian ...')
+             log.Write('          ----   Warning! Potential invalid calculation of linear molecule from Gaussian ...')
          else:
              if hasattr(bbe, "gibbs_free_energy"):
                  log.Write("\no  "+'{:<39}'.format(os.path.splitext(os.path.basename(file))[0]))
@@ -1048,6 +1058,23 @@ def main():
                  if l_o_t[i] != l_o_t[0] and i != 0:
                     l_o_t_print += ", " + l_o_t[i] + " (" + file_version[i] + ")"
              log.Write("\nx  " + l_o_t_print)
+          charge_check = [sp_energy(file)[5] for file in files]
+          multiplicity_check = []
+          for file in files:
+               multiplicity_calc = calc_bbe(file, options.QH, options.freq_cutoff, options.temperature, options.conc, options.freq_scale_factor, options.solv, options.spc)
+               multiplicity_check.append(str(int(multiplicity_calc.mult)))
+          if all_same(charge_check) != False and all_same(multiplicity_check) != False:
+             log.Write("\no  Using charge and multiplicity "+charge_check[0]+ " " + multiplicity_check[0] + " in all the calculations.")
+          else:
+             charge_check_print = "CAUTION: different charge and multiplicity found - " + charge_check[0] + " " + multiplicity_check[0] + " (" + file_version[0]
+             for i in range(len(charge_check)):
+                 if charge_check[i] == charge_check[0] and multiplicity_check[i] == multiplicity_check[0] and i != 0:
+                    charge_check_print += ", " + file_version[i]
+             charge_check_print += ")"
+             for i in range(len(charge_check)):
+                 if charge_check[i] != charge_check[0] or multiplicity_check[i] != multiplicity_check[0] and i != 0:
+                    charge_check_print += ", " + charge_check[i] + " " + multiplicity_check[i] + " (" + file_version[i] + ")"
+             log.Write("\nx  " + charge_check_print)
           energy_duplic,files_duplic = [],[]
           for file in files:
               energy_duplic.append(sp_energy(file)[0])
@@ -1207,6 +1234,23 @@ def main():
                            if l_o_t_spc[i] != l_o_t_spc[0] and i != 0:
                               l_o_t_spc_print += ", " + l_o_t_spc[i] + " (" + names_spc[i] + ")"
                         log.Write("\nx  " + l_o_t_spc_print)
+                    charge_spc_check = [sp_energy(name)[5] for name in names_spc]
+                    multiplicity_spc_check = []
+                    for name in names_spc:
+                         multiplicity_spc_calc = calc_bbe(name, options.QH, options.freq_cutoff, options.temperature, options.conc, options.freq_scale_factor, options.solv, options.spc)
+                         multiplicity_spc_check.append(str(int(multiplicity_spc_calc.mult)))
+                    if all_same(charge_spc_check) != False and all_same(multiplicity_spc_check) != False:
+                       log.Write("\no  Using charge and multiplicity "+charge_spc_check[0]+ " " + multiplicity_spc_check[0] + " in all the single-point corrections.")
+                    else:
+                       charge_spc_check_print = "CAUTION: different charge and multiplicity found - " + charge_spc_check[0] + " " + multiplicity_spc_check[0] + " (" + names_spc[0]
+                       for i in range(len(charge_check)):
+                           if charge_spc_check[i] == charge_spc_check[0] and multiplicity_spc_check[i] == multiplicity_spc_check[0] and i != 0:
+                              charge_spc_check_print += ", " + names_spc[i]
+                       charge_spc_check_print += ")"
+                       for i in range(len(charge_spc_check)):
+                           if charge_spc_check[i] != charge_spc_check[0] or multiplicity_spc_check[i] != multiplicity_spc_check[0] and i != 0:
+                              charge_spc_check_print += ", " + charge_spc_check[i] + " " + multiplicity_spc_check[i] + " (" + names_spc[i] + ")"
+                       log.Write("\nx  " + charge_spc_check_print)
                     #Check if the geometries of freq calculations match their corresponding structures in single-point calculations
                     geom_duplic_list,geom_duplic_list_spc,geom_duplic_cart,geom_duplic_files,geom_duplic_cart_spc,geom_duplic_files_spc = [],[],[],[],[],[]
                     for file in files:
@@ -1256,9 +1300,9 @@ def main():
             warning_linear = calc_bbe(file, options.QH, options.freq_cutoff, options.temperature, options.conc, options.freq_scale_factor, options.solv, options.spc)
             linear_warning = []
             linear_warning.append(warning_linear.linear_warning)
-            if linear_warning == [['WARNING! Potential invalid calculation of linear molecule from Gaussian.']]:
+            if linear_warning == [['Warning! Potential invalid calculation of linear molecule from Gaussian.']]:
                log.Write("\nx  "+'{:<39}'.format(os.path.splitext(os.path.basename(file))[0]))
-               log.Write('             WARNING! Potential invalid calculation of linear molecule from Gaussian ...')
+               log.Write('             Warning! Potential invalid calculation of linear molecule from Gaussian ...')
             else:
                 if hasattr(bbe, "gibbs_free_energy"):
                    log.Write("\no  "+'{:<39}'.format(os.path.splitext(os.path.basename(file))[0]))
